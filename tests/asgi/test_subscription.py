@@ -4,7 +4,7 @@ import pytest
 
 import starlette
 
-from strawberry.asgi.constants import (
+from strawberry.subscriptions.constants import (
     GQL_COMPLETE,
     GQL_CONNECTION_ACK,
     GQL_CONNECTION_INIT,
@@ -14,15 +14,15 @@ from strawberry.asgi.constants import (
     GQL_ERROR,
     GQL_START,
     GQL_STOP,
+    GRAPHQL_WS,
 )
-
-from .utils import TickEventLoopPolicy
+from tests.fixtures.utils import TickEventLoopPolicy
 
 
 def test_simple_subscription(test_client):
     asyncio.set_event_loop_policy(TickEventLoopPolicy())
 
-    with test_client.websocket_connect("/", "graphql-ws") as ws:
+    with test_client.websocket_connect("/", GRAPHQL_WS) as ws:
         ws.send_json({"type": GQL_CONNECTION_INIT})
         ws.send_json(
             {
@@ -52,10 +52,49 @@ def test_simple_subscription(test_client):
             ws.receive_json()
 
 
+def test_operation_selection(test_client):
+    asyncio.set_event_loop_policy(TickEventLoopPolicy())
+
+    with test_client.websocket_connect("/", GRAPHQL_WS) as ws:
+        ws.send_json({"type": GQL_CONNECTION_INIT})
+        ws.send_json(
+            {
+                "type": GQL_START,
+                "id": "demo",
+                "payload": {
+                    "query": """
+                        subscription Subscription1 { echo(message: "Hi1") }
+                        subscription Subscription2 { echo(message: "Hi2") }
+                    """,
+                    "operationName": "Subscription2",
+                },
+            }
+        )
+
+        response = ws.receive_json()
+        assert response["type"] == GQL_CONNECTION_ACK
+
+        response = ws.receive_json()
+        assert response["type"] == GQL_DATA
+        assert response["id"] == "demo"
+        assert response["payload"]["data"] == {"echo": "Hi2"}
+
+        ws.send_json({"type": GQL_STOP, "id": "demo"})
+        response = ws.receive_json()
+        assert response["type"] == GQL_COMPLETE
+        assert response["id"] == "demo"
+
+        ws.send_json({"type": GQL_CONNECTION_TERMINATE})
+
+        # make sure the websocket is disconnected now
+        with pytest.raises(starlette.websockets.WebSocketDisconnect):
+            ws.receive_json()
+
+
 def test_sends_keep_alive(test_client_keep_alive):
     asyncio.set_event_loop_policy(TickEventLoopPolicy())
 
-    with test_client_keep_alive.websocket_connect("/", "graphql-ws") as ws:
+    with test_client_keep_alive.websocket_connect("/", GRAPHQL_WS) as ws:
         ws.send_json({"type": GQL_CONNECTION_INIT})
         ws.send_json(
             {
@@ -98,7 +137,7 @@ def test_sends_keep_alive(test_client_keep_alive):
 
 
 def test_subscription_errors(test_client):
-    with test_client.websocket_connect("/", "graphql-ws") as ws:
+    with test_client.websocket_connect("/", GRAPHQL_WS) as ws:
         ws.send_json({"type": GQL_CONNECTION_INIT})
         ws.send_json(
             {
@@ -132,7 +171,7 @@ def test_subscription_errors(test_client):
 
 
 def test_subscription_field_error(test_client):
-    with test_client.websocket_connect("/", "graphql-ws") as ws:
+    with test_client.websocket_connect("/", GRAPHQL_WS) as ws:
         ws.send_json({"type": GQL_CONNECTION_INIT})
         ws.send_json(
             {
@@ -164,7 +203,7 @@ def test_subscription_field_error(test_client):
 
 
 def test_subscription_syntax_error(test_client):
-    with test_client.websocket_connect("/", "graphql-ws") as ws:
+    with test_client.websocket_connect("/", GRAPHQL_WS) as ws:
         ws.send_json({"type": GQL_CONNECTION_INIT})
         ws.send_json(
             {
